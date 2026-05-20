@@ -9,6 +9,7 @@ import (
 	"net/http/httputil"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/conversun/fnos-mihomo-dashboard/internal/handlers"
 )
@@ -22,6 +23,7 @@ func main() {
 	configFile := flag.String("config", "/etc/mihomo/config.yaml", "mihomo config.yaml path")
 	logFile := flag.String("log", "/var/log/mihomo.log", "mihomo log file path")
 	metacubexdDir := flag.String("metacubexd", "", "optional metacubexd static dir to serve at /clash/")
+	subRefreshHours := flag.Int("sub-refresh-hours", 12, "auto-refresh subscription every N hours (0 = off)")
 	flag.Parse()
 
 	mihomoURL, err := url.Parse(*mihomoAPI)
@@ -39,6 +41,8 @@ func main() {
 	mux.HandleFunc("/api/reload", h.Reload)
 	mux.HandleFunc("/api/overrides", h.Overrides)
 	mux.HandleFunc("/api/config", h.Config)
+	mux.HandleFunc("/api/subscription/info", h.SubscriptionInfo)
+	mux.HandleFunc("/api/subscription/refresh", h.SubscriptionRefresh)
 
 	// Reverse proxy to mihomo RESTful API (for clients that need raw mihomo API)
 	mihomoProxy := httputil.NewSingleHostReverseProxy(mihomoURL)
@@ -78,6 +82,25 @@ func main() {
 	log.Printf("  log        : %s", *logFile)
 	if *metacubexdDir != "" {
 		log.Printf("  metacubexd : %s (mounted at /clash/)", *metacubexdDir)
+	}
+
+	// Auto-refresh subscription every N hours (mihomo's own proxy-providers.interval
+	// already does this, but we re-trigger to be sure + refresh subscription-userinfo)
+	if *subRefreshHours > 0 {
+		go func() {
+			ticker := time.NewTicker(time.Duration(*subRefreshHours) * time.Hour)
+			defer ticker.Stop()
+			for range ticker.C {
+				log.Println("auto-refresh subscription tick")
+				req, _ := http.NewRequest(http.MethodPost, "http://127.0.0.1"+*listen+"/api/subscription/refresh", nil)
+				resp, err := http.DefaultClient.Do(req)
+				if err != nil {
+					log.Printf("auto-refresh failed: %v", err)
+					continue
+				}
+				resp.Body.Close()
+			}
+		}()
 	}
 
 	srv := &http.Server{

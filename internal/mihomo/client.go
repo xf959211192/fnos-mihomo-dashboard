@@ -105,3 +105,21 @@ func (c *Client) ReloadConfigPath(path string) error {
 	}
 	return nil
 }
+
+// UpdateProvider forces mihomo to re-fetch the named proxy-provider immediately.
+func (c *Client) UpdateProvider(name string) error {
+	u := *c.BaseURL
+	u.Path = "/providers/proxies/" + url.PathEscape(name)
+	req, _ := http.NewRequest(http.MethodPut, u.String(), nil)
+	resp, err := c.HTTP.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 300 {
+		b, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("mihomo /providers/proxies/%s returned %d: %s", name, resp.StatusCode, b)
+	}
+	return nil
+}
+

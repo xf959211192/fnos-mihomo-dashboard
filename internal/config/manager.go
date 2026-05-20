@@ -205,3 +205,41 @@ func (m *Manager) AppliedOverrides() []map[string]any {
 		{"key": "tun.inet4-route-exclude-address", "desc": "剔除 198.18.0.0/16 (fake-ip 段必须由 TUN 接管)", "value": "sanitized"},
 	}
 }
+
+// Backup copies config.yaml to config.yaml.bak (atomic). Returns path of backup.
+func (m *Manager) Backup() (string, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	data, err := os.ReadFile(m.Path)
+	if err != nil {
+		return "", err
+	}
+	bak := m.Path + ".bak"
+	tmp := bak + ".tmp"
+	if err := os.WriteFile(tmp, data, 0o644); err != nil {
+		return "", err
+	}
+	if err := os.Rename(tmp, bak); err != nil {
+		return "", err
+	}
+	return bak, nil
+}
+
+// RestoreFromBackup overwrites config.yaml with config.yaml.bak.
+func (m *Manager) RestoreFromBackup() error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	bak := m.Path + ".bak"
+	data, err := os.ReadFile(bak)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(m.Path, data, 0o644)
+}
+
+// HasBackup reports whether a previous backup file exists.
+func (m *Manager) HasBackup() bool {
+	_, err := os.Stat(m.Path + ".bak")
+	return err == nil
+}
+

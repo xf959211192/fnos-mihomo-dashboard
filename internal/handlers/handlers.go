@@ -8,6 +8,7 @@ import (
 
 	"github.com/conversun/fnos-mihomo-dashboard/internal/config"
 	"github.com/conversun/fnos-mihomo-dashboard/internal/mihomo"
+	"github.com/conversun/fnos-mihomo-dashboard/internal/subscription"
 )
 
 type Handlers struct {
@@ -15,6 +16,7 @@ type Handlers struct {
 	logFile string
 	mihomo  *mihomo.Client
 	confPath string
+	subInfo *subscription.Cache
 }
 
 func New(configFile, logFile string, mihomoAPI *url.URL) *Handlers {
@@ -23,6 +25,7 @@ func New(configFile, logFile string, mihomoAPI *url.URL) *Handlers {
 		logFile:  logFile,
 		mihomo:   mihomo.New(mihomoAPI),
 		confPath: configFile,
+		subInfo:  subscription.NewCache(),
 	}
 }
 
@@ -58,17 +61,28 @@ func (h *Handlers) Subscription(w http.ResponseWriter, r *http.Request) {
 			writeErr(w, 400, errEmptyURL)
 			return
 		}
+		// Health-checked write: backup current config first; if mihomo
+		// reload fails after applying changes, automatically roll back.
+		bakPath, _ := h.cfg.Backup()
 		if err := h.cfg.SetSubscription(body.URL); err != nil {
 			writeErr(w, 500, err)
 			return
 		}
-		// Trigger mihomo to reload from updated config.yaml
 		if err := h.mihomo.ReloadConfigPath(h.confPath); err != nil {
-			writeJSON(w, 200, map[string]any{
-				"ok":      true,
-				"warning": "config saved but mihomo reload failed: " + err.Error(),
+			// rollback
+			rbErr := h.cfg.RestoreFromBackup()
+			_ = h.mihomo.ReloadConfigPath(h.confPath)
+			writeJSON(w, 502, map[string]any{
+				"error":          "mihomo reload failed; config rolled back",
+				"detail":         err.Error(),
+				"rollback_error": rollbackErr(rbErr),
+				"backup":         bakPath,
 			})
 			return
+		}
+		// Best-effort: fetch subscription-userinfo for the UI
+		if info, ferr := subscription.Fetch(body.URL); ferr == nil {
+			h.subInfo.Put(body.URL, info)
 		}
 		writeJSON(w, 200, map[string]bool{"ok": true})
 
@@ -114,6 +128,51 @@ func (h *Handlers) Reload(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]bool{"ok": true})
 }
 
+// GET /api/subscription/info — returns cached subscription-userinfo (used / total / expire)
+func (h *Handlers) SubscriptionInfo(w http.ResponseWriter, r *http.Request) {
+	url, err := h.cfg.GetSubscription()
+	if err != nil {
+		writeErr(w, 500, err)
+		return
+	}
+	if url == "" {
+		writeJSON(w, 200, map[string]any{"present": false})
+		return
+	}
+	info := h.subInfo.Get(url)
+	if info == nil {
+		// fetch on-demand
+		if fetched, ferr := subscription.Fetch(url); ferr == nil {
+			h.subInfo.Put(url, fetched)
+			info = fetched
+		}
+	}
+	if info == nil {
+		writeJSON(w, 200, map[string]any{"present": true, "info": nil, "url": url})
+		return
+	}
+	writeJSON(w, 200, map[string]any{"present": true, "info": info})
+}
+
+// POST /api/subscription/refresh — ask mihomo to re-pull the proxy-provider URL right now
+func (h *Handlers) SubscriptionRefresh(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	if err := h.mihomo.UpdateProvider("fnos-subscription"); err != nil {
+		writeErr(w, 502, err)
+		return
+	}
+	// refresh subscription-userinfo too
+	if url, _ := h.cfg.GetSubscription(); url != "" {
+		if info, ferr := subscription.Fetch(url); ferr == nil {
+			h.subInfo.Put(url, info)
+		}
+	}
+	writeJSON(w, 200, map[string]bool{"ok": true})
+}
+
 // GET /api/config — return raw config.yaml content (post-override)
 func (h *Handlers) Config(w http.ResponseWriter, r *http.Request) {
 	b, err := os.ReadFile(h.confPath)
@@ -144,6 +203,13 @@ func splitLastN(b []byte, n int) []byte {
 		}
 	}
 	return b
+}
+
+func rollbackErr(err error) string {
+	if err == nil {
+		return ""
+	}
+	return err.Error()
 }
 
 type errStr string
