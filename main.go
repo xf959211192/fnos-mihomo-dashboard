@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/conversun/fnos-mihomo-dashboard/internal/handlers"
+	_ "github.com/breml/rootcerts" // embed Mozilla CA bundle so HTTPS works even without system ca-certificates
 )
 
 //go:embed web/dist

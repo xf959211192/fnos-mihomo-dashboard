@@ -3,3 +3,5 @@ module github.com/conversun/fnos-mihomo-dashboard
 go 1.22
 
 require gopkg.in/yaml.v3 v3.0.1
+
+require github.com/breml/rootcerts v0.3.5
