@@ -44,6 +44,14 @@ func main() {
 	mihomoProxy := httputil.NewSingleHostReverseProxy(mihomoURL)
 	mux.Handle("/mihomo/", http.StripPrefix("/mihomo", mihomoProxy))
 
+	// Serve metacubexd's config.js dynamically so it auto-connects through our reverse proxy.
+	// Browser side: defaultBackendURL = '<origin>/mihomo' → dashboard /mihomo/* → mihomo 127.0.0.1
+	mux.HandleFunc("/clash/config.js", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/javascript; charset=utf-8")
+		w.Header().Set("Cache-Control", "no-store")
+		_, _ = w.Write([]byte("window.__METACUBEXD_CONFIG__ = { defaultBackendURL: window.location.origin + '/mihomo' };\n"))
+	})
+
 	// Serve metacubexd at /clash/ if provided (escape hatch for advanced users)
 	if *metacubexdDir != "" {
 		fileSrv := http.FileServer(http.Dir(*metacubexdDir))
