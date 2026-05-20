@@ -26,14 +26,10 @@
   </div>
 
   <!-- Status bar -->
-  <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-5 mb-6 grid grid-cols-3 gap-4">
+  <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-5 mb-6 grid grid-cols-2 gap-4">
     <div>
       <div class="text-xs text-gray-500 uppercase">内核版本</div>
       <div class="text-lg font-semibold mt-1" x-text="status.version?.version || '—'"></div>
-    </div>
-    <div>
-      <div class="text-xs text-gray-500 uppercase">当前节点</div>
-      <div class="text-lg font-semibold mt-1 truncate" x-text="status.current_proxy || '—'"></div>
     </div>
     <div>
       <div class="text-xs text-gray-500 uppercase">连接状态</div>
@@ -59,22 +55,6 @@
     </div>
     <p x-show="message" class="mt-3 text-sm" :class="messageOK ? 'text-green-600' : 'text-red-600'" x-text="message"></p>
   </div>
-
-  <!-- Proxy selection -->
-  <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-6 mb-6" x-show="proxies.length > 0">
-    <h2 class="text-lg font-semibold mb-1">节点选择</h2>
-    <p class="text-sm text-gray-500 mb-4">PROXY 策略组当前可用节点</p>
-    <div class="grid grid-cols-2 gap-2 max-h-64 overflow-auto">
-      <template x-for="p in proxies" :key="p">
-        <button @click="selectProxy(p)"
-                class="px-3 py-2 text-sm border rounded text-left hover:bg-gray-50"
-                :class="p === status.current_proxy ? 'border-blue-500 bg-blue-50 font-medium' : 'border-gray-200'">
-          <span x-text="p"></span>
-        </button>
-      </template>
-    </div>
-  </div>
-
   <!-- Logs -->
   <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
     <h2 class="text-lg font-semibold mb-3">日志 (最近 100 行)</h2>
@@ -88,7 +68,6 @@ function app() {
   return {
     subUrl: '',
     status: {},
-    proxies: [],
     logs: '',
     saving: false,
     message: '',
@@ -110,9 +89,6 @@ function app() {
         this.status = statusRes;
         if (!this.subUrl) this.subUrl = subRes.url || '';
         this.logs = logsRes;
-        if (proxiesRes?.proxies?.PROXY?.all) {
-          this.proxies = proxiesRes.proxies.PROXY.all.filter(n => n !== 'DIRECT' && n !== 'REJECT');
-        }
       } catch (e) { console.warn(e); }
     },
 
@@ -142,12 +118,6 @@ function app() {
         this.saving = false;
       }
     },
-
-    async selectProxy(name) {
-      try {
-        const r = await fetch('/api/proxies/select', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ group: 'PROXY', name }),
         });
         if (r.ok) this.loadAll();

@@ -36,8 +36,6 @@ func main() {
 	mux.HandleFunc("/api/subscription", h.Subscription)
 	mux.HandleFunc("/api/status", h.Status)
 	mux.HandleFunc("/api/logs", h.Logs)
-	mux.HandleFunc("/api/proxies", h.Proxies)
-	mux.HandleFunc("/api/proxies/select", h.SelectProxy)
 	mux.HandleFunc("/api/reload", h.Reload)
 
 	// Reverse proxy to mihomo RESTful API (for clients that need raw mihomo API)

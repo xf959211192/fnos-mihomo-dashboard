@@ -85,14 +85,6 @@ func (h *Handlers) Status(w http.ResponseWriter, r *http.Request) {
 	} else {
 		out["version_error"] = err.Error()
 	}
-	if p, err := h.mihomo.Proxies(); err == nil {
-		// Extract PROXY group's current selection
-		if all, ok := p["proxies"].(map[string]any); ok {
-			if proxyGroup, ok := all["PROXY"].(map[string]any); ok {
-				out["current_proxy"] = proxyGroup["now"]
-			}
-		}
-	}
 	writeJSON(w, 200, out)
 }
 
@@ -107,40 +99,6 @@ func (h *Handlers) Logs(w http.ResponseWriter, r *http.Request) {
 	lines := splitLastN(b, 100)
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	_, _ = w.Write(lines)
-}
-
-// GET /api/proxies → returns the raw proxies map from mihomo
-func (h *Handlers) Proxies(w http.ResponseWriter, r *http.Request) {
-	p, err := h.mihomo.Proxies()
-	if err != nil {
-		writeErr(w, 502, err)
-		return
-	}
-	writeJSON(w, 200, p)
-}
-
-// POST /api/proxies/select  body {group: "PROXY", name: "..."}
-func (h *Handlers) SelectProxy(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		w.WriteHeader(http.StatusMethodNotAllowed)
-		return
-	}
-	var body struct {
-		Group string `json:"group"`
-		Name  string `json:"name"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		writeErr(w, 400, err)
-		return
-	}
-	if body.Group == "" {
-		body.Group = "PROXY"
-	}
-	if err := h.mihomo.SelectProxy(body.Group, body.Name); err != nil {
-		writeErr(w, 502, err)
-		return
-	}
-	writeJSON(w, 200, map[string]bool{"ok": true})
 }
 
 // POST /api/reload — force mihomo to reload config.yaml from disk
