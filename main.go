@@ -21,7 +21,7 @@ func main() {
 	mihomoAPI := flag.String("mihomo-api", "http://127.0.0.1:9090", "mihomo internal API")
 	configFile := flag.String("config", "/etc/mihomo/config.yaml", "mihomo config.yaml path")
 	logFile := flag.String("log", "/var/log/mihomo.log", "mihomo log file path")
-	metacubexdDir := flag.String("metacubexd", "", "optional metacubexd static dir to serve at /ui/")
+	metacubexdDir := flag.String("metacubexd", "", "optional metacubexd static dir to serve at /clash/")
 	flag.Parse()
 
 	mihomoURL, err := url.Parse(*mihomoAPI)
@@ -44,7 +44,7 @@ func main() {
 	mihomoProxy := httputil.NewSingleHostReverseProxy(mihomoURL)
 	mux.Handle("/mihomo/", http.StripPrefix("/mihomo", mihomoProxy))
 
-	// Serve metacubexd at /ui/ if provided (escape hatch for advanced users)
+	// Serve metacubexd at /clash/ if provided (escape hatch for advanced users)
 	if *metacubexdDir != "" {
 		fileSrv := http.FileServer(http.Dir(*metacubexdDir))
 		mux.Handle("/clash/", http.StripPrefix("/clash/", fileSrv))
