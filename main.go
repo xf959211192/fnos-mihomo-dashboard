@@ -47,7 +47,7 @@ func main() {
 	// Serve metacubexd at /ui/ if provided (escape hatch for advanced users)
 	if *metacubexdDir != "" {
 		fileSrv := http.FileServer(http.Dir(*metacubexdDir))
-		mux.Handle("/ui/", http.StripPrefix("/ui/", fileSrv))
+		mux.Handle("/clash/", http.StripPrefix("/clash/", fileSrv))
 	}
 
 	// Serve our embedded UI at /
@@ -69,7 +69,7 @@ func main() {
 	log.Printf("  config     : %s", *configFile)
 	log.Printf("  log        : %s", *logFile)
 	if *metacubexdDir != "" {
-		log.Printf("  metacubexd : %s (mounted at /ui/)", *metacubexdDir)
+		log.Printf("  metacubexd : %s (mounted at /clash/)", *metacubexdDir)
 	}
 
 	srv := &http.Server{
