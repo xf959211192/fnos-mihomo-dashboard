@@ -88,3 +88,42 @@ func Fetch(url string) (*Info, error) {
 	}
 	return info, nil
 }
+
+// Validate quickly checks if a URL is reachable and returns something that
+// at least *looks* like a Clash yaml subscription. Returns nil on success.
+//
+// We can't fully validate without consuming the entire body (which can be
+// large) but we cheaply reject:
+//   - non-2xx HTTP responses
+//   - HTML pages (e.g. landing pages, 404 fallbacks like example.com/*)
+//   - empty bodies
+func Validate(url string) error {
+	req, err := http.NewRequest(http.MethodGet, url, nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("User-Agent", "clash.meta")
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		return errors.New("subscription URL returned HTTP " + strconv.Itoa(resp.StatusCode))
+	}
+	buf := make([]byte, 512)
+	n, _ := resp.Body.Read(buf)
+	if n == 0 {
+		return errors.New("subscription URL returned an empty body")
+	}
+	head := strings.ToLower(strings.TrimSpace(string(buf[:n])))
+	if strings.HasPrefix(head, "<!doctype html") || strings.HasPrefix(head, "<html") {
+		return errors.New("subscription URL returned an HTML page (not a Clash yaml). Verify the URL is correct")
+	}
+	if !strings.ContainsAny(head, ":-") {
+		return errors.New("subscription URL response does not look like a yaml config")
+	}
+	return nil
+}
+

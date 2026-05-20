@@ -61,6 +61,11 @@ func (h *Handlers) Subscription(w http.ResponseWriter, r *http.Request) {
 			writeErr(w, 400, errEmptyURL)
 			return
 		}
+		// Pre-flight: cheaply reject obviously bad URLs (HTML pages, 4xx/5xx)
+		if err := subscription.Validate(body.URL); err != nil {
+			writeErr(w, 400, err)
+			return
+		}
 		// Health-checked write: backup current config first; if mihomo
 		// reload fails after applying changes, automatically roll back.
 		bakPath, _ := h.cfg.Backup()
