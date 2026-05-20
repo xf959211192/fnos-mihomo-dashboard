@@ -1,6 +1,6 @@
 fnos-mihomo-dashboard
 fnos-mihomo-dashboard-*
-dist/
+/dist/
 *.test
 vendor/
 .idea/
