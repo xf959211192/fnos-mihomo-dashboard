@@ -72,6 +72,26 @@
     </ul>
   </div>
 
+    <!-- Final config.yaml -->
+  <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-6 mb-6">
+    <div class="flex items-center justify-between mb-3">
+      <div>
+        <h2 class="text-lg font-semibold">最终配置文件</h2>
+        <p class="text-sm text-gray-500 mt-1">dashboard 实际写入 mihomo 的 <code class="text-xs bg-gray-100 px-1.5 py-0.5 rounded">config.yaml</code> (含 fnOS 覆盖)</p>
+      </div>
+      <div class="flex items-center gap-2">
+        <button @click="copyConfig" class="text-sm px-3 py-1.5 bg-gray-100 hover:bg-gray-200 rounded">
+          <span x-show="!copied">复制</span>
+          <span x-show="copied" class="text-green-600">✓ 已复制</span>
+        </button>
+        <button @click="showConfig = !showConfig" class="text-sm px-3 py-1.5 bg-gray-100 hover:bg-gray-200 rounded">
+          <span x-text="showConfig ? '收起' : '展开'"></span>
+        </button>
+      </div>
+    </div>
+    <pre x-show="showConfig" x-text="configYaml || '加载中…'" class="text-xs bg-gray-900 text-gray-100 p-3 rounded overflow-auto max-h-96 whitespace-pre"></pre>
+  </div>
+
   <!-- Logs -->
   <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
     <h2 class="text-lg font-semibold mb-3">日志 (最近 100 行)</h2>
@@ -87,6 +107,9 @@ function app() {
     status: {},
     logs: '',
     overrides: [],
+    configYaml: '',
+    showConfig: false,
+    copied: false,
     saving: false,
     message: '',
     messageOK: true,
@@ -103,12 +126,14 @@ function app() {
           fetch('/api/subscription').then(r => r.json()),
           fetch('/api/logs').then(r => r.text()),
           fetch('/api/overrides').then(r => r.json()).catch(() => ({overrides:[]})),
+          fetch('/api/config').then(r => r.text()).catch(() => ''),
           fetch('/api/proxies').then(r => r.json()).catch(() => null),
         ]);
         this.status = statusRes;
         if (!this.subUrl) this.subUrl = subRes.url || '';
         this.logs = logsRes;
         this.overrides = ovRes.overrides || [];
+        this.configYaml = cfgRes;
       } catch (e) { console.warn(e); }
     },
 

@@ -38,6 +38,7 @@ func main() {
 	mux.HandleFunc("/api/logs", h.Logs)
 	mux.HandleFunc("/api/reload", h.Reload)
 	mux.HandleFunc("/api/overrides", h.Overrides)
+	mux.HandleFunc("/api/config", h.Config)
 
 	// Reverse proxy to mihomo RESTful API (for clients that need raw mihomo API)
 	mihomoProxy := httputil.NewSingleHostReverseProxy(mihomoURL)

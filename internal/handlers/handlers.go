@@ -114,6 +114,17 @@ func (h *Handlers) Reload(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]bool{"ok": true})
 }
 
+// GET /api/config — return raw config.yaml content (post-override)
+func (h *Handlers) Config(w http.ResponseWriter, r *http.Request) {
+	b, err := os.ReadFile(h.confPath)
+	if err != nil {
+		writeErr(w, 500, err)
+		return
+	}
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	_, _ = w.Write(b)
+}
+
 // GET /api/overrides — list fnOS overrides applied to every saved config
 func (h *Handlers) Overrides(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{
