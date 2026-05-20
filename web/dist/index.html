@@ -55,6 +55,23 @@
     </div>
     <p x-show="message" class="mt-3 text-sm" :class="messageOK ? 'text-green-600' : 'text-red-600'" x-text="message"></p>
   </div>
+    <!-- fnOS Overrides -->
+  <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-6 mb-6">
+    <h2 class="text-lg font-semibold mb-1">fnOS 旁路由优化</h2>
+    <p class="text-sm text-gray-500 mb-4">每次保存订阅后, dashboard 自动确保以下字段适配 fnOS 旁路由场景 (基于 mihomo 实战经验)</p>
+    <ul class="space-y-2 text-sm">
+      <template x-for="o in overrides" :key="o.key">
+        <li class="flex items-start gap-2">
+          <span class="text-green-600 mt-0.5">✓</span>
+          <div>
+            <code class="text-xs bg-gray-100 px-1.5 py-0.5 rounded" x-text="o.key"></code>
+            <span class="text-gray-700 ml-1" x-text="o.desc"></span>
+          </div>
+        </li>
+      </template>
+    </ul>
+  </div>
+
   <!-- Logs -->
   <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
     <h2 class="text-lg font-semibold mb-3">日志 (最近 100 行)</h2>
@@ -69,6 +86,7 @@ function app() {
     subUrl: '',
     status: {},
     logs: '',
+    overrides: [],
     saving: false,
     message: '',
     messageOK: true,
@@ -84,11 +102,13 @@ function app() {
           fetch('/api/status').then(r => r.json()),
           fetch('/api/subscription').then(r => r.json()),
           fetch('/api/logs').then(r => r.text()),
+          fetch('/api/overrides').then(r => r.json()).catch(() => ({overrides:[]})),
           fetch('/api/proxies').then(r => r.json()).catch(() => null),
         ]);
         this.status = statusRes;
         if (!this.subUrl) this.subUrl = subRes.url || '';
         this.logs = logsRes;
+        this.overrides = ovRes.overrides || [];
       } catch (e) { console.warn(e); }
     },
 

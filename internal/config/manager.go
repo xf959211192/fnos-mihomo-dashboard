@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 
 	"gopkg.in/yaml.v3"
@@ -117,6 +118,8 @@ func (m *Manager) SetSubscription(url string) error {
 		cfg["rules"] = []any{"MATCH,PROXY"}
 	}
 
+	applyFnOSOverrides(cfg)
+
 	return m.writeUnsafe(cfg)
 }
 
@@ -143,4 +146,62 @@ func (m *Manager) writeUnsafe(cfg map[string]any) error {
 		return err
 	}
 	return os.Rename(tmp, m.Path)
+}
+
+
+// applyFnOSOverrides ensures fnOS 旁路由 / transparent-proxy safety:
+//   1. profile.store-selected + store-fake-ip = true (persist UI selection)
+//   2. sniffer enabled (TLS/HTTP/QUIC) — without it, transparent-proxy rules
+//      fall through to MATCH/Final (see ../docs/mihomo.md §2.4)
+//   3. tun.inet4-route-exclude-address strips 198.18.0.0/16 (fake-ip must
+//      be handled by TUN, see ../docs/mihomo.md §2.1)
+func applyFnOSOverrides(cfg map[string]any) {
+	// 1. profile (always force)
+	profile, _ := cfg["profile"].(map[string]any)
+	if profile == nil {
+		profile = map[string]any{}
+	}
+	profile["store-selected"] = true
+	profile["store-fake-ip"] = true
+	cfg["profile"] = profile
+
+	// 2. sniffer (only set if user didn't configure)
+	if _, ok := cfg["sniffer"]; !ok {
+		cfg["sniffer"] = map[string]any{
+			"enable": true,
+			"sniff": map[string]any{
+				"TLS":  map[string]any{"ports": []any{443, 8443}},
+				"HTTP": map[string]any{"ports": []any{80, 8080, 8880}, "override-destination": true},
+				"QUIC": map[string]any{"ports": []any{443, 8443}},
+			},
+			"parse-pure-ip":        true,
+			"override-destination": true,
+			"skip-domain":          []any{"+.apple.com", "+.icloud.com"},
+		}
+	}
+
+	// 3. tun: strip 198.18.x from inet4-route-exclude-address
+	if tun, ok := cfg["tun"].(map[string]any); ok {
+		if excludes, ok := tun["inet4-route-exclude-address"].([]any); ok {
+			filtered := make([]any, 0, len(excludes))
+			for _, e := range excludes {
+				if s, ok := e.(string); ok && strings.HasPrefix(s, "198.18.") {
+					continue
+				}
+				filtered = append(filtered, e)
+			}
+			tun["inet4-route-exclude-address"] = filtered
+			cfg["tun"] = tun
+		}
+	}
+}
+
+// AppliedOverrides returns a human-readable list of overrides applied to the config.
+func (m *Manager) AppliedOverrides() []map[string]any {
+	return []map[string]any{
+		{"key": "profile.store-selected", "desc": "持久化策略组选择 (重启保留)", "value": true},
+		{"key": "profile.store-fake-ip", "desc": "持久化 fake-ip 池", "value": true},
+		{"key": "sniffer", "desc": "TLS/HTTP/QUIC Sniffer (透明代理规则匹配)", "value": "enabled"},
+		{"key": "tun.inet4-route-exclude-address", "desc": "剔除 198.18.0.0/16 (fake-ip 段必须由 TUN 接管)", "value": "sanitized"},
+	}
 }

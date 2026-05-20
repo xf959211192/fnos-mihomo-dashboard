@@ -114,6 +114,13 @@ func (h *Handlers) Reload(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]bool{"ok": true})
 }
 
+// GET /api/overrides — list fnOS overrides applied to every saved config
+func (h *Handlers) Overrides(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, 200, map[string]any{
+		"overrides": h.cfg.AppliedOverrides(),
+	})
+}
+
 // splitLastN returns the last n lines of b (joined with newline).
 func splitLastN(b []byte, n int) []byte {
 	count := 0
