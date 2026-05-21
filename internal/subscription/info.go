@@ -195,3 +195,60 @@ func FetchProxies(rawURL string) (proxies []any, info *Info, err error) {
 	return rawProxies, info, nil
 }
 
+// FetchFullYAML downloads the subscription URL and returns the full raw yaml
+// body (so callers can use it as the entire mihomo config) along with
+// subscription-userinfo. Validates that the body parses as yaml and contains
+// a non-empty proxies list — refuses to save junk.
+func FetchFullYAML(rawURL string) (body []byte, info *Info, err error) {
+	req, err := http.NewRequest(http.MethodGet, rawURL, nil)
+	if err != nil {
+		return nil, nil, err
+	}
+	req.Header.Set("User-Agent", "clash.meta")
+	client := &http.Client{Timeout: 60 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		return nil, nil, fmt.Errorf("subscription URL returned HTTP %d", resp.StatusCode)
+	}
+	body, err = io.ReadAll(io.LimitReader(resp.Body, 16<<20))
+	if err != nil {
+		return nil, nil, err
+	}
+	var probe map[string]any
+	if err := yaml.Unmarshal(body, &probe); err != nil {
+		return nil, nil, fmt.Errorf("parse subscription yaml: %w", err)
+	}
+	if proxies, _ := probe["proxies"].([]any); len(proxies) == 0 {
+		return nil, nil, errors.New("subscription yaml has no `proxies` field (empty / not a Clash subscription?)")
+	}
+	if header := resp.Header.Get("subscription-userinfo"); header != "" {
+		info = &Info{UpdatedAt: time.Now().Unix(), URL: rawURL}
+		for _, kv := range strings.Split(header, ";") {
+			kv = strings.TrimSpace(kv)
+			parts := strings.SplitN(kv, "=", 2)
+			if len(parts) != 2 {
+				continue
+			}
+			val, perr := strconv.ParseInt(strings.TrimSpace(parts[1]), 10, 64)
+			if perr != nil {
+				continue
+			}
+			switch strings.TrimSpace(parts[0]) {
+			case "upload":
+				info.Upload = val
+			case "download":
+				info.Download = val
+			case "total":
+				info.Total = val
+			case "expire":
+				info.Expire = val
+			}
+		}
+	}
+	return body, info, nil
+}
+

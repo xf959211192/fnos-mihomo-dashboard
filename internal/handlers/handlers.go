@@ -66,15 +66,16 @@ func (h *Handlers) Subscription(w http.ResponseWriter, r *http.Request) {
 			writeErr(w, 400, err)
 			return
 		}
-		// Pull subscription yaml + extract just the `proxies` field. This handles
-		// both bare proxy-provider yamls and full Clash configs.
-		proxies, info, err := subscription.FetchProxies(body.URL)
+		// Pull full subscription yaml. We preserve the user's proxies /
+		// proxy-groups / rules / rule-providers and only override fnOS-managed
+		// fields (external-controller, profile, dns, tun, sniffer).
+		fullYAML, info, err := subscription.FetchFullYAML(body.URL)
 		if err != nil {
 			writeErr(w, 400, fmt.Errorf("fetch subscription: %w", err))
 			return
 		}
 		bakPath, _ := h.cfg.Backup()
-		if err := h.cfg.SetSubscriptionFromURL(body.URL, proxies); err != nil {
+		if err := h.cfg.SetSubscriptionFromURL(body.URL, fullYAML); err != nil {
 			writeErr(w, 500, err)
 			return
 		}
@@ -92,10 +93,7 @@ func (h *Handlers) Subscription(w http.ResponseWriter, r *http.Request) {
 		if info != nil {
 			h.subInfo.Put(body.URL, info)
 		}
-		writeJSON(w, 200, map[string]any{
-			"ok":            true,
-			"proxies_count": len(proxies),
-		})
+		writeJSON(w, 200, map[string]bool{"ok": true})
 
 	default:
 		w.WriteHeader(http.StatusMethodNotAllowed)
@@ -182,25 +180,21 @@ func (h *Handlers) SubscriptionRefresh(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, fmt.Errorf("no subscription URL configured yet"))
 		return
 	}
-	proxies, info, err := subscription.FetchProxies(url)
+	fullYAML, info, err := subscription.FetchFullYAML(url)
 	if err != nil {
 		writeErr(w, 502, err)
 		return
 	}
-	if err := h.cfg.SetSubscriptionFromURL(url, proxies); err != nil {
+	if err := h.cfg.SetSubscriptionFromURL(url, fullYAML); err != nil {
 		writeErr(w, 500, err)
 		return
 	}
-	// Ask mihomo to re-read the provider file. Ignored error: mihomo will
-	// pick up the change on its own at next health-check interval anyway.
-	_ = h.mihomo.UpdateProvider("fnos-subscription")
+	// Trigger a full mihomo reload from disk so all changed fields take effect
+	_ = h.mihomo.ReloadConfigPath(h.confPath)
 	if info != nil {
 		h.subInfo.Put(url, info)
 	}
-	writeJSON(w, 200, map[string]any{
-		"ok":            true,
-		"proxies_count": len(proxies),
-	})
+	writeJSON(w, 200, map[string]bool{"ok": true})
 }
 
 // GET /api/config — return raw config.yaml content (post-override)
