@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"fmt"
 	"encoding/json"
 	"net/http"
 	"net/url"
@@ -61,20 +62,23 @@ func (h *Handlers) Subscription(w http.ResponseWriter, r *http.Request) {
 			writeErr(w, 400, errEmptyURL)
 			return
 		}
-		// Pre-flight: cheaply reject obviously bad URLs (HTML pages, 4xx/5xx)
 		if err := subscription.Validate(body.URL); err != nil {
 			writeErr(w, 400, err)
 			return
 		}
-		// Health-checked write: backup current config first; if mihomo
-		// reload fails after applying changes, automatically roll back.
+		// Pull subscription yaml + extract just the `proxies` field. This handles
+		// both bare proxy-provider yamls and full Clash configs.
+		proxies, info, err := subscription.FetchProxies(body.URL)
+		if err != nil {
+			writeErr(w, 400, fmt.Errorf("fetch subscription: %w", err))
+			return
+		}
 		bakPath, _ := h.cfg.Backup()
-		if err := h.cfg.SetSubscription(body.URL); err != nil {
+		if err := h.cfg.SetSubscriptionFromURL(body.URL, proxies); err != nil {
 			writeErr(w, 500, err)
 			return
 		}
 		if err := h.mihomo.ReloadConfigPath(h.confPath); err != nil {
-			// rollback
 			rbErr := h.cfg.RestoreFromBackup()
 			_ = h.mihomo.ReloadConfigPath(h.confPath)
 			writeJSON(w, 502, map[string]any{
@@ -85,11 +89,13 @@ func (h *Handlers) Subscription(w http.ResponseWriter, r *http.Request) {
 			})
 			return
 		}
-		// Best-effort: fetch subscription-userinfo for the UI
-		if info, ferr := subscription.Fetch(body.URL); ferr == nil {
+		if info != nil {
 			h.subInfo.Put(body.URL, info)
 		}
-		writeJSON(w, 200, map[string]bool{"ok": true})
+		writeJSON(w, 200, map[string]any{
+			"ok":            true,
+			"proxies_count": len(proxies),
+		})
 
 	default:
 		w.WriteHeader(http.StatusMethodNotAllowed)
@@ -159,23 +165,42 @@ func (h *Handlers) SubscriptionInfo(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{"present": true, "info": info})
 }
 
-// POST /api/subscription/refresh — ask mihomo to re-pull the proxy-provider URL right now
+// POST /api/subscription/refresh — dashboard re-pulls the subscription URL,
+// re-extracts proxies, rewrites the local provider file, then asks mihomo to
+// reload that provider.
 func (h *Handlers) SubscriptionRefresh(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		w.WriteHeader(http.StatusMethodNotAllowed)
 		return
 	}
-	if err := h.mihomo.UpdateProvider("fnos-subscription"); err != nil {
+	url, err := h.cfg.GetSubscription()
+	if err != nil {
+		writeErr(w, 500, err)
+		return
+	}
+	if url == "" {
+		writeErr(w, 400, fmt.Errorf("no subscription URL configured yet"))
+		return
+	}
+	proxies, info, err := subscription.FetchProxies(url)
+	if err != nil {
 		writeErr(w, 502, err)
 		return
 	}
-	// refresh subscription-userinfo too
-	if url, _ := h.cfg.GetSubscription(); url != "" {
-		if info, ferr := subscription.Fetch(url); ferr == nil {
-			h.subInfo.Put(url, info)
-		}
+	if err := h.cfg.SetSubscriptionFromURL(url, proxies); err != nil {
+		writeErr(w, 500, err)
+		return
 	}
-	writeJSON(w, 200, map[string]bool{"ok": true})
+	// Ask mihomo to re-read the provider file. Ignored error: mihomo will
+	// pick up the change on its own at next health-check interval anyway.
+	_ = h.mihomo.UpdateProvider("fnos-subscription")
+	if info != nil {
+		h.subInfo.Put(url, info)
+	}
+	writeJSON(w, 200, map[string]any{
+		"ok":            true,
+		"proxies_count": len(proxies),
+	})
 }
 
 // GET /api/config — return raw config.yaml content (post-override)

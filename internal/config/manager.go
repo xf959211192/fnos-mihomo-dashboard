@@ -123,16 +123,116 @@ func (m *Manager) SetSubscription(url string) error {
 	return m.writeUnsafe(cfg)
 }
 
+// subURLPath returns the sidecar file that stores the current subscription URL.
+// We keep it separate from config.yaml because the proxy-provider now uses
+// type: file (mihomo doesn't need to know the original remote URL).
+func (m *Manager) subURLPath() string {
+	return filepath.Join(filepath.Dir(m.Path), ".fnos-subscription.url")
+}
+
 // GetSubscription returns the current fnos-subscription URL (or empty string).
 func (m *Manager) GetSubscription() (string, error) {
-	cfg, err := m.Read()
+	b, err := os.ReadFile(m.subURLPath())
+	if os.IsNotExist(err) {
+		return "", nil
+	}
 	if err != nil {
 		return "", err
 	}
+	return strings.TrimSpace(string(b)), nil
+}
+
+// SetSubscriptionFromURL persists the subscription URL, writes the supplied
+// proxies list to providers/fnos-subscription.yaml (the file mihomo will
+// actually read), and updates config.yaml so the PROXY group references it
+// via a `type: file` proxy-provider. Applies fnOS overrides at the end.
+func (m *Manager) SetSubscriptionFromURL(url string, proxies []any) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if len(proxies) == 0 {
+		return fmt.Errorf("refusing to save an empty proxies list")
+	}
+
+	dir := filepath.Dir(m.Path)
+	providersDir := filepath.Join(dir, "providers")
+	if err := os.MkdirAll(providersDir, 0o755); err != nil {
+		return err
+	}
+	providerFile := filepath.Join(providersDir, "fnos-subscription.yaml")
+	providerYaml, err := yaml.Marshal(map[string]any{"proxies": proxies})
+	if err != nil {
+		return err
+	}
+	if err := os.WriteFile(providerFile, providerYaml, 0o644); err != nil {
+		return err
+	}
+	if err := os.WriteFile(m.subURLPath(), []byte(url), 0o644); err != nil {
+		return err
+	}
+
+	cfg, err := m.readUnsafe()
+	if err != nil {
+		return err
+	}
+
 	providers, _ := cfg["proxy-providers"].(map[string]any)
-	sub, _ := providers["fnos-subscription"].(map[string]any)
-	url, _ := sub["url"].(string)
-	return url, nil
+	if providers == nil {
+		providers = map[string]any{}
+	}
+	providers["fnos-subscription"] = map[string]any{
+		"type": "file",
+		"path": providerFile,
+		"health-check": map[string]any{
+			"enable":   true,
+			"url":      "http://www.gstatic.com/generate_204",
+			"interval": 300,
+		},
+	}
+	cfg["proxy-providers"] = providers
+
+	groups, _ := cfg["proxy-groups"].([]any)
+	hasFnosGroup := false
+	for i, g := range groups {
+		gm, ok := g.(map[string]any)
+		if !ok {
+			continue
+		}
+		if name, _ := gm["name"].(string); name == "PROXY" {
+			use, _ := gm["use"].([]any)
+			has := false
+			for _, u := range use {
+				if s, _ := u.(string); s == "fnos-subscription" {
+					has = true
+					break
+				}
+			}
+			if !has {
+				use = append(use, "fnos-subscription")
+				gm["use"] = use
+			}
+			groups[i] = gm
+			hasFnosGroup = true
+			break
+		}
+	}
+	if !hasFnosGroup {
+		groups = append([]any{map[string]any{
+			"name":    "PROXY",
+			"type":    "select",
+			"use":     []any{"fnos-subscription"},
+			"proxies": []any{"DIRECT"},
+		}}, groups...)
+	}
+	cfg["proxy-groups"] = groups
+
+	if rules, _ := cfg["rules"].([]any); len(rules) == 0 {
+		cfg["rules"] = []any{"MATCH,PROXY"}
+	}
+
+	applyFnOSOverrides(cfg)
+
+	return m.writeUnsafe(cfg)
 }
 
 func (m *Manager) writeUnsafe(cfg map[string]any) error {

@@ -1,6 +1,9 @@
 package subscription
 
 import (
+	"gopkg.in/yaml.v3"
+	"fmt"
+	"io"
 	"errors"
 	"net/http"
 	"strconv"
@@ -125,5 +128,70 @@ func Validate(url string) error {
 		return errors.New("subscription URL response does not look like a yaml config")
 	}
 	return nil
+}
+
+// FetchProxies downloads the subscription URL, parses it as yaml, extracts
+// the `proxies` list, and returns it along with any subscription-userinfo.
+//
+// This accepts both shapes a subscription endpoint may return:
+//   - bare proxy-provider yaml: `proxies: [...]`
+//   - full Clash config yaml:   `proxies: [...]; proxy-groups: [...]; rules: [...]; ...`
+//
+// We always extract just `proxies`, which is what mihomo's proxy-providers
+// `type: file` expects. This is the key insight that lets users paste their
+// airline's standard "Clash subscription URL" without manual editing.
+func FetchProxies(rawURL string) (proxies []any, info *Info, err error) {
+	req, err := http.NewRequest(http.MethodGet, rawURL, nil)
+	if err != nil {
+		return nil, nil, err
+	}
+	req.Header.Set("User-Agent", "clash.meta")
+	client := &http.Client{Timeout: 60 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		return nil, nil, fmt.Errorf("subscription URL returned HTTP %d", resp.StatusCode)
+	}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 16<<20)) // 16 MB safety cap
+	if err != nil {
+		return nil, nil, err
+	}
+	var data map[string]any
+	if err := yaml.Unmarshal(body, &data); err != nil {
+		return nil, nil, fmt.Errorf("parse subscription yaml: %w", err)
+	}
+	rawProxies, _ := data["proxies"].([]any)
+	if len(rawProxies) == 0 {
+		return nil, nil, errors.New("subscription yaml has no `proxies` field (empty / not a Clash subscription?)")
+	}
+	// subscription-userinfo header (best-effort)
+	if header := resp.Header.Get("subscription-userinfo"); header != "" {
+		info = &Info{UpdatedAt: time.Now().Unix(), URL: rawURL}
+		for _, kv := range strings.Split(header, ";") {
+			kv = strings.TrimSpace(kv)
+			parts := strings.SplitN(kv, "=", 2)
+			if len(parts) != 2 {
+				continue
+			}
+			val, perr := strconv.ParseInt(strings.TrimSpace(parts[1]), 10, 64)
+			if perr != nil {
+				continue
+			}
+			switch strings.TrimSpace(parts[0]) {
+			case "upload":
+				info.Upload = val
+			case "download":
+				info.Download = val
+			case "total":
+				info.Total = val
+			case "expire":
+				info.Expire = val
+			}
+		}
+	}
+	return rawProxies, info, nil
 }
 
