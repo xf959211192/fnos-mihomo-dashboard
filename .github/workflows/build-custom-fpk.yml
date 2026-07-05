@@ -1,0 +1,127 @@
+name: Build custom fnOS Mihomo FPK
+
+on:
+  workflow_dispatch:
+    inputs:
+      fpk_version:
+        description: "FPK version shown in fnOS, e.g. 1.19.27.1"
+        required: true
+        default: "1.19.27.1"
+      mihomo_version:
+        description: "MetaCubeX/mihomo version without v, or latest"
+        required: true
+        default: "latest"
+      arch:
+        description: "Target architecture"
+        required: true
+        default: "x86"
+        type: choice
+        options:
+          - x86
+
+jobs:
+  build-fpk:
+    name: Build x86 FPK
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout custom dashboard source
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+          cache: true
+
+      - name: Format and test Go code
+        run: |
+          gofmt -w .
+          go test ./...
+
+      - name: Build custom dashboard binary
+        run: |
+          mkdir -p dist
+          GOOS=linux GOARCH=amd64 CGO_ENABLED=0 \
+            go build -trimpath -ldflags="-s -w" \
+            -o dist/fnos-mihomo-dashboard .
+          file dist/fnos-mihomo-dashboard
+          chmod +x dist/fnos-mihomo-dashboard
+
+      - name: Checkout fnOS app packaging repo
+        uses: actions/checkout@v4
+        with:
+          repository: conversun/fnos-apps
+          path: fnos-apps
+
+      - name: Resolve Mihomo version
+        id: version
+        env:
+          INPUT_VERSION: ${{ inputs.mihomo_version }}
+        run: |
+          set -euo pipefail
+          if [ "$INPUT_VERSION" = "latest" ]; then
+            VERSION=$(curl -fsSL https://api.github.com/repos/MetaCubeX/mihomo/releases/latest \
+              | python3 -c 'import json,sys; print(json.load(sys.stdin)["tag_name"].lstrip("v"))')
+          else
+            VERSION="$INPUT_VERSION"
+          fi
+          echo "mihomo_version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Using mihomo version: $VERSION"
+
+      - name: Download Mihomo and MetaCubeXD
+        env:
+          MIHOMO_VERSION: ${{ steps.version.outputs.mihomo_version }}
+        run: |
+          set -euo pipefail
+          mkdir -p work
+
+          MIHOMO_URL="https://github.com/MetaCubeX/mihomo/releases/download/v${MIHOMO_VERSION}/mihomo-linux-amd64-v${MIHOMO_VERSION}.gz"
+          METACUBEXD_URL="https://github.com/MetaCubeX/metacubexd/archive/refs/heads/gh-pages.zip"
+
+          echo "Downloading $MIHOMO_URL"
+          curl -L -f -o work/mihomo.gz "$MIHOMO_URL"
+          gunzip -c work/mihomo.gz > work/mihomo
+          chmod +x work/mihomo
+
+          echo "Downloading $METACUBEXD_URL"
+          curl -L -f -o work/metacubexd.zip "$METACUBEXD_URL"
+          unzip -q work/metacubexd.zip -d work
+          test -d work/metacubexd-gh-pages
+
+      - name: Build app.tgz with custom dashboard
+        run: |
+          set -euo pipefail
+          APP_ROOT="$PWD/work/app_root"
+          PKG_DIR="$PWD/fnos-apps/apps/mihomo/fnos"
+
+          mkdir -p "$APP_ROOT/bin" "$APP_ROOT/ui" "$APP_ROOT/metacubexd"
+
+          cp work/mihomo "$APP_ROOT/mihomo"
+          cp dist/fnos-mihomo-dashboard "$APP_ROOT/fnos-mihomo-dashboard"
+          cp -a work/metacubexd-gh-pages/. "$APP_ROOT/metacubexd/"
+          cp "$PKG_DIR/bin/mihomo-server" "$APP_ROOT/bin/mihomo-server"
+          cp -a "$PKG_DIR/ui"/. "$APP_ROOT/ui/" 2>/dev/null || true
+
+          chmod +x "$APP_ROOT/mihomo" "$APP_ROOT/fnos-mihomo-dashboard" "$APP_ROOT/bin/mihomo-server"
+
+          tar -czf work/app.tgz -C "$APP_ROOT" .
+          ls -lh work/app.tgz
+
+      - name: Build FPK
+        env:
+          FPK_VERSION: ${{ inputs.fpk_version }}
+          ARCH: ${{ inputs.arch }}
+        run: |
+          set -euo pipefail
+          mkdir -p release
+          cd release
+          ../fnos-apps/scripts/build-fpk.sh ../fnos-apps/apps/mihomo ../work/app.tgz "$FPK_VERSION" "$ARCH"
+          ls -lh *.fpk
+
+      - name: Upload FPK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: custom-mihomo-fpk
+          path: release/*.fpk
+          if-no-files-found: error
