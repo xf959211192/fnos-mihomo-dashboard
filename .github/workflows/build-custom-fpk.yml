@@ -120,7 +120,8 @@ jobs:
           mkdir -p release
           cd release
           ../fnos-apps/scripts/build-fpk.sh ../fnos-apps/apps/mihomo ../work/app.tgz "$FPK_VERSION" "$ARCH"
-          ls -lh *.fpk
+          sha256sum *.fpk > "mihomo_${FPK_VERSION}_${ARCH}.fpk.sha256"
+          ls -lh *.fpk *.sha256
 
       - name: Upload FPK artifact
         uses: actions/upload-artifact@v4
@@ -129,7 +130,7 @@ jobs:
           path: release/*.fpk
           if-no-files-found: error
 
-      - name: Upload FPK to GitHub Release
+      - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           FPK_VERSION: ${{ inputs.fpk_version }}
@@ -141,9 +142,10 @@ jobs:
           NOTES="Custom fnOS Mihomo FPK built from this fork.\n\nMihomo core: ${MIHOMO_VERSION}\nDashboard commit: ${GITHUB_SHA}"
 
           if gh release view "$TAG" >/dev/null 2>&1; then
-            gh release upload "$TAG" release/*.fpk --clobber
+            gh release upload "$TAG" release/* --clobber
           else
-            gh release create "$TAG" release/*.fpk \
+            gh release create "$TAG" \
               --title "$TITLE" \
-              --notes "$NOTES"
+              --notes "$NOTES" \
+              release/*
           fi
