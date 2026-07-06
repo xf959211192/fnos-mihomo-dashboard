@@ -4,9 +4,9 @@ on:
   workflow_dispatch:
     inputs:
       fpk_version:
-        description: "FPK version shown in fnOS, e.g. 1.19.27.1"
+        description: "FPK version shown in fnOS, e.g. 1.19.27"
         required: true
-        default: "1.19.27.1"
+        default: "1.19.27"
       mihomo_version:
         description: "MetaCubeX/mihomo version without v, or latest"
         required: true
@@ -127,7 +127,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: custom-mihomo-fpk
-          path: release/*.fpk
+          path: release/*
           if-no-files-found: error
 
       - name: Create GitHub Release
