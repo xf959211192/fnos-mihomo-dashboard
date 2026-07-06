@@ -19,6 +19,9 @@ on:
         options:
           - x86
 
+permissions:
+  contents: write
+
 jobs:
   build-fpk:
     name: Build x86 FPK
@@ -125,3 +128,22 @@ jobs:
           name: custom-mihomo-fpk
           path: release/*.fpk
           if-no-files-found: error
+
+      - name: Upload FPK to GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          FPK_VERSION: ${{ inputs.fpk_version }}
+          MIHOMO_VERSION: ${{ steps.version.outputs.mihomo_version }}
+        run: |
+          set -euo pipefail
+          TAG="custom-mihomo-${FPK_VERSION}"
+          TITLE="Custom fnOS Mihomo ${FPK_VERSION}"
+          NOTES="Custom fnOS Mihomo FPK built from this fork.\n\nMihomo core: ${MIHOMO_VERSION}\nDashboard commit: ${GITHUB_SHA}"
+
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" release/*.fpk --clobber
+          else
+            gh release create "$TAG" release/*.fpk \
+              --title "$TITLE" \
+              --notes "$NOTES"
+          fi
